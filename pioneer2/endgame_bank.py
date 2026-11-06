@@ -42,5 +42,5 @@ def real_endgame_bank(
 
 
 if __name__ == "__main__":
-    df = real_endgame_bank(limit=10).collect(streaming=True)
+    df = real_endgame_bank(limit=10).collect(engine="streaming")
     print(df)

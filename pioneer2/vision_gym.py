@@ -24,6 +24,7 @@ from dataclasses import dataclass
 
 import chess
 
+from .board_view import render_board
 from .endgame_bank import real_endgame_bank
 from .transforms import canonical_key
 
@@ -103,13 +104,19 @@ def make_session(
     bank_fens: list[str],
     n_items: int = 20,
     seed: int = 0,
+    max_answer: int = 3,
 ) -> list[DrillItem]:
+    """Rejection-sample until every item has a non-trivial answer (1..max_answer
+    squares). Empty-answer items teach nothing and waste a trial."""
     rng = random.Random(seed)
-    fens = rng.sample(bank_fens, min(n_items, len(bank_fens)))
-    items = []
-    for i, fen in enumerate(fens):
-        board = chess.Board(fen)
-        items.append(king_scan_item(board) if i % 2 == 0 else target_reach_item(board, rng))
+    items: list[DrillItem] = []
+    attempts = 0
+    while len(items) < n_items and attempts < n_items * 30:
+        attempts += 1
+        board = chess.Board(rng.choice(bank_fens))
+        item = king_scan_item(board) if len(items) % 2 == 0 else target_reach_item(board, rng)
+        if 0 < len(item.answer) <= max_answer:
+            items.append(item)
     return items
 
 
@@ -118,15 +125,13 @@ def grade(item: DrillItem, response: set) -> bool:
 
 
 def load_bank(min_pieces: int = 6, max_pieces: int = 10, limit: int = 500) -> list[str]:
-    df = real_endgame_bank(min_pieces, max_pieces, limit=limit).collect(streaming=True)
+    df = real_endgame_bank(min_pieces, max_pieces, limit=limit).collect(engine="streaming")
     return df["FEN"].to_list()
 
 
 if __name__ == "__main__":
-    bank = load_bank(limit=50)
+    bank = load_bank(limit=200)
     for item in make_session(bank, n_items=6, seed=1):
-        b = chess.Board(item.fen)
-        print(item.kind, item.piece_count, item.fen)
-        print("  ", item.question, "->", sorted(chess.square_name(s) for s in item.answer))
-        print("   direct:", sorted(chess.square_name(s) for s in direct_attackers(b, not b.turn, b.king(b.turn))),
-              "xray:", sorted(chess.square_name(s) for s in xray_attackers(b, not b.turn, b.king(b.turn))))
+        print(f"\n{item.kind} ({item.piece_count} pieces)")
+        print(render_board(item.fen))
+        print(item.question)

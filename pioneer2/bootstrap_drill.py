@@ -21,6 +21,7 @@ from pathlib import Path
 import chess
 import polars as pl
 
+from .board_view import render_board
 from .puzzle_corpus import DATASET
 from .transforms import canonical_key, mirror_fen
 
@@ -48,15 +49,17 @@ def load_theme_bank(
     rating_band: tuple[int, int] = RATING_BAND,
     limit: int = 5000,
 ) -> list[dict]:
-    cond = (pl.col("Rating") >= rating_band[0]) & (pl.col("Rating") <= rating_band[1])
+    rating_cond = (pl.col("Rating") >= rating_band[0]) & (pl.col("Rating") <= rating_band[1])
+    theme_cond = None
     for t in themes:
-        cond |= pl.col("Themes").list.contains(t)
+        c = pl.col("Themes").list.contains(t)
+        theme_cond = c if theme_cond is None else (theme_cond | c)
     df = (
         pl.scan_parquet(DATASET)
-        .filter(cond)
+        .filter(rating_cond & theme_cond)
         .select("PuzzleId", "FEN", "Themes", "Rating", "Moves")
         .limit(limit)
-        .collect(streaming=True)
+        .collect(engine="streaming")
     )
     return df.to_dicts()
 
@@ -106,9 +109,9 @@ class DrillSession:
     def serve(self, item: dict, is_test: bool) -> Attempt:
         mirrored = is_test and self.rng.random() < 0.5
         fen_shown = mirror_fen(item["FEN"]) if mirrored else item["FEN"]
-        board = chess.Board(fen_shown)
-        print(f"\n[{'TEST' if is_test else 'train'}] FEN: {fen_shown} "
-              f"(rating {item['Rating']}, clock {self.clock_s}s)")
+        print(f"\n[{'TEST' if is_test else 'train'}] rating {item['Rating']}, clock {self.clock_s}s")
+        print(render_board(fen_shown))
+        print(f"FEN: {fen_shown}")
         t0 = time.monotonic()
         answer = input("your move (uci, from White's view of the shown board): ").strip()
         latency = time.monotonic() - t0
